@@ -375,18 +375,33 @@ inline static void ts_offset_update(struct ffmpeg_muxer *stream,
 	stream->found_audio[packet->track_idx] = true;
 }
 
-static bool ffmpeg_mux_start(void *data)
+static inline void update_encoder_settings(struct ffmpeg_muxer *stream,
+					   const char *path)
 {
-	struct ffmpeg_muxer *stream = data;
-	obs_data_t *settings;
-	const char *path;
+	obs_encoder_t *vencoder = obs_output_get_video_encoder(stream->output);
+	const char *ext = strrchr(path, '.');
+
+	/* if using m3u8, repeat headers */
+	if (ext && strcmp(ext, ".m3u8") == 0) {
+		obs_data_t *settings = obs_encoder_get_settings(vencoder);
+		obs_data_set_bool(settings, "repeat_headers", true);
+		obs_encoder_update(vencoder, settings);
+		obs_data_release(settings);
+	}
+}
+
+static inline bool ffmpeg_mux_start_internal(struct ffmpeg_muxer *stream,
+					     obs_data_t *settings)
+{
+	const char *path = obs_data_get_string(settings, "path");
+
+	update_encoder_settings(stream, path);
 
 	if (!obs_output_can_begin_data_capture(stream->output, 0))
 		return false;
 	if (!obs_output_initialize_encoders(stream->output, 0))
 		return false;
 
-	settings = obs_output_get_settings(stream->output);
 	if (stream->is_network) {
 		obs_service_t *service;
 		service = obs_output_get_service(stream->output);
@@ -394,17 +409,13 @@ static bool ffmpeg_mux_start(void *data)
 			return false;
 		path = obs_service_get_url(service);
 		stream->split_file = false;
-		stream->reset_timestamps = false;
 	} else {
-		path = obs_data_get_string(settings, "path");
 
 		stream->max_time =
 			obs_data_get_int(settings, "max_time_sec") * 1000000LL;
 		stream->max_size = obs_data_get_int(settings, "max_size_mb") *
 				   (1024 * 1024);
 		stream->split_file = obs_data_get_bool(settings, "split_file");
-		stream->reset_timestamps =
-			obs_data_get_bool(settings, "reset_timestamps");
 		stream->allow_overwrite =
 			obs_data_get_bool(settings, "allow_overwrite");
 		stream->cur_size = 0;
@@ -430,7 +441,6 @@ static bool ffmpeg_mux_start(void *data)
 	}
 
 	start_pipe(stream, path);
-	obs_data_release(settings);
 
 	if (!stream->pipe) {
 		obs_output_set_last_error(
@@ -447,6 +457,17 @@ static bool ffmpeg_mux_start(void *data)
 
 	info("Writing file '%s'...", stream->path.array);
 	return true;
+}
+
+static bool ffmpeg_mux_start(void *data)
+{
+	struct ffmpeg_muxer *stream = data;
+
+	obs_data_t *settings = obs_output_get_settings(stream->output);
+	bool success = ffmpeg_mux_start_internal(stream, settings);
+	obs_data_release(settings);
+
+	return success;
 }
 
 int deactivate(struct ffmpeg_muxer *stream, int code)
@@ -615,7 +636,7 @@ bool write_packet(struct ffmpeg_muxer *stream, struct encoder_packet *packet)
 							: FFM_PACKET_AUDIO,
 				       .keyframe = packet->keyframe};
 
-	if (stream->split_file && stream->reset_timestamps) {
+	if (stream->split_file) {
 		if (is_video) {
 			info.dts -= stream->video_pts_offset;
 			info.pts -= stream->video_pts_offset;
@@ -846,8 +867,7 @@ static void ffmpeg_mux_data(void *data, struct encoder_packet *packet)
 		for (size_t i = 0; i < stream->mux_packets.num; i++) {
 			struct encoder_packet *pkt =
 				&stream->mux_packets.array[i];
-			if (stream->reset_timestamps)
-				ts_offset_update(stream, pkt);
+			ts_offset_update(stream, pkt);
 			write_packet(stream, pkt);
 			obs_encoder_packet_release(pkt);
 		}
@@ -856,7 +876,7 @@ static void ffmpeg_mux_data(void *data, struct encoder_packet *packet)
 		os_atomic_set_bool(&stream->manual_split, false);
 	}
 
-	if (stream->split_file && stream->reset_timestamps)
+	if (stream->split_file)
 		ts_offset_update(stream, packet);
 
 	write_packet(stream, packet);

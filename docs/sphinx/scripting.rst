@@ -10,11 +10,9 @@ Scripting can be accessed in OBS Studio via the Tools menu -> Scripts
 option, which will bring up the scripting dialog.  Scripts can be added,
 removed, and reloaded in real time while the program is running.
 
-**NOTE:** On Windows, currently only Python 3.6 is supported.  To use
-Python on Windows, you must download and install Python 3.6.x "x86-64"
-for OBS 64bit (64bit is the default), or Python 3.6.x "x86" if using OBS
-32bit.  Then, in the scripting dialog, you must set the path to the
-Python 3.6.x install in the "Python Settings" tab.
+**NOTE:** To use Python on Windows or macOS, you must download and install a
+Python version that matches your OBS architecture.  Then, in the scripting
+dialog, you must set the path to the Python install in the "Python Settings" tab.
 
 All API bindings are provided through the **obspython** module in
 Python, and the **obslua** module in Lua.
@@ -196,6 +194,14 @@ modules/namespaces).
    Enumerates scene items within a scene.
 
    :param scene: obs_scene_t object to enumerate items from.
+   :return:      List of scene items.  Release with
+                 :py:func:`sceneitem_list_release()`.
+
+.. py:function:: obs_sceneitem_group_enum_items(group)
+
+   Enumerates scene items within a group.
+
+   :param group: obs_sceneitem_t object to enumerate items from.
    :return:      List of scene items.  Release with
                  :py:func:`sceneitem_list_release()`.
 

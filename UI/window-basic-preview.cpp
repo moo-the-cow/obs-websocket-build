@@ -1718,8 +1718,6 @@ static void DrawLine(float x1, float y1, float x2, float y2, float thickness,
 
 static void DrawSquareAtPos(float x, float y, float pixelRatio)
 {
-	OBSBasic *main = OBSBasic::Get();
-
 	struct vec3 pos;
 	vec3_set(&pos, x, y, 0.0f);
 
@@ -1743,8 +1741,6 @@ static void DrawSquareAtPos(float x, float y, float pixelRatio)
 static void DrawRotationHandle(gs_vertbuffer_t *circle, float rot,
 			       float pixelRatio)
 {
-	OBSBasic *main = OBSBasic::Get();
-
 	struct vec3 pos;
 	vec3_set(&pos, 0.5f, 0.0f, 0.0f);
 
@@ -2453,7 +2449,12 @@ void OBSBasicPreview::DrawSpacingHelpers()
 
 	OBSBasic *main = OBSBasic::Get();
 
-	if (main->ui->sources->selectionModel()->selectedIndexes().count() > 1)
+	vec2 s;
+	SceneFindBoxData data(s, s);
+
+	obs_scene_enum_items(main->GetCurrentScene(), FindSelected, &data);
+
+	if (data.sceneItems.size() > 1)
 		return;
 
 	OBSSceneItem item = main->GetCurrentSceneItem();
@@ -2465,6 +2466,12 @@ void OBSBasicPreview::DrawSpacingHelpers()
 
 	vec2 itemSize = GetItemSize(item);
 	if (itemSize.x == 0.0f || itemSize.y == 0.0f)
+		return;
+
+	obs_sceneitem_t *parentGroup =
+		obs_sceneitem_get_group(main->GetCurrentScene(), item);
+
+	if (parentGroup && obs_sceneitem_locked(parentGroup))
 		return;
 
 	matrix4 boxTransform;
@@ -2490,6 +2497,23 @@ void OBSBasicPreview::DrawSpacingHelpers()
 	// Decide which side to use with box transform, based on rotation
 	// Seems hacky, probably a better way to do it
 	float rot = oti.rot;
+
+	if (parentGroup) {
+		obs_transform_info groupOti;
+		obs_sceneitem_get_info(parentGroup, &groupOti);
+
+		//Correct the scene item rotation angle
+		rot = oti.rot + groupOti.rot;
+
+		// Correct the scene item box transform
+		// Based on scale, rotation angle, position of parent's group
+		matrix4_scale3f(&boxTransform, &boxTransform, groupOti.scale.x,
+				groupOti.scale.y, 1.0f);
+		matrix4_rotate_aa4f(&boxTransform, &boxTransform, 0.0f, 0.0f,
+				    1.0f, RAD(groupOti.rot));
+		matrix4_translate3f(&boxTransform, &boxTransform,
+				    groupOti.pos.x, groupOti.pos.y, 0.0f);
+	}
 
 	if (rot >= HELPER_ROT_BREAKPONT) {
 		for (float i = HELPER_ROT_BREAKPONT; i <= 360.0f; i += 90.0f) {

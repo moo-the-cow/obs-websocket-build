@@ -20,6 +20,9 @@ using namespace std;
 // Size of the audio indicator in pixels
 #define INDICATOR_THICKNESS 3
 
+// Padding on top and bottom of vertical meters
+#define METER_PADDING 1
+
 QWeakPointer<VolumeMeterTimer> VolumeMeter::updateTimer;
 
 void VolControl::OBSVolumeChanged(void *data, float db)
@@ -245,7 +248,6 @@ VolControl::VolControl(OBSSource source_, bool showConfig, bool vertical)
 
 		setMaximumWidth(110);
 	} else {
-		QHBoxLayout *volLayout = new QHBoxLayout;
 		QHBoxLayout *textLayout = new QHBoxLayout;
 		QHBoxLayout *botLayout = new QHBoxLayout;
 
@@ -258,16 +260,17 @@ VolControl::VolControl(OBSSource source_, bool showConfig, bool vertical)
 		textLayout->setAlignment(nameLabel, Qt::AlignLeft);
 		textLayout->setAlignment(volLabel, Qt::AlignRight);
 
-		volLayout->addWidget(slider);
-		volLayout->addWidget(mute);
-		volLayout->setSpacing(5);
-
 		botLayout->setContentsMargins(0, 0, 0, 0);
-		botLayout->setSpacing(0);
-		botLayout->addLayout(volLayout);
+		botLayout->setSpacing(5);
+		botLayout->addWidget(slider);
+		botLayout->addWidget(mute);
+		botLayout->setAlignment(slider, Qt::AlignVCenter);
+		botLayout->setAlignment(mute, Qt::AlignVCenter);
 
-		if (showConfig)
+		if (showConfig) {
 			botLayout->addWidget(config);
+			botLayout->setAlignment(config, Qt::AlignVCenter);
+		}
 
 		mainLayout->addItem(textLayout);
 		mainLayout->addWidget(volMeter);
@@ -1035,7 +1038,7 @@ void VolumeMeter::paintVTicks(QPainter &painter, int x, int y, int height)
 
 	// Draw major tick lines and numeric indicators.
 	for (int i = 0; i >= minimumLevel; i -= 5) {
-		int position = y + int(i * scale);
+		int position = y + int(i * scale) + METER_PADDING;
 		QString str = QString::number(i);
 
 		// Center the number on the tick, but don't overflow
@@ -1054,7 +1057,7 @@ void VolumeMeter::paintVTicks(QPainter &painter, int x, int y, int height)
 	// Draw minor tick lines.
 	painter.setPen(minorTickColor);
 	for (int i = 0; i >= minimumLevel; i--) {
-		int position = y + int(i * scale);
+		int position = y + int(i * scale) + METER_PADDING;
 		if (i % 5 != 0)
 			painter.drawLine(x, position, x + 1, position);
 	}
@@ -1067,6 +1070,19 @@ void VolumeMeter::ClipEnding()
 	clipping = false;
 }
 
+inline int VolumeMeter::convertToInt(float number)
+{
+	constexpr int min = std::numeric_limits<int>::min();
+	constexpr int max = std::numeric_limits<int>::max();
+
+	if (number > max)
+		return max;
+	else if (number < min)
+		return min;
+	else
+		return int(number);
+}
+
 void VolumeMeter::paintHMeter(QPainter &painter, int x, int y, int width,
 			      int height, float magnitude, float peak,
 			      float peakHold)
@@ -1076,11 +1092,11 @@ void VolumeMeter::paintHMeter(QPainter &painter, int x, int y, int width,
 	QMutexLocker locker(&dataMutex);
 	int minimumPosition = x + 0;
 	int maximumPosition = x + width;
-	int magnitudePosition = int(x + width - (magnitude * scale));
-	int peakPosition = int(x + width - (peak * scale));
-	int peakHoldPosition = int(x + width - (peakHold * scale));
-	int warningPosition = int(x + width - (warningLevel * scale));
-	int errorPosition = int(x + width - (errorLevel * scale));
+	int magnitudePosition = x + width - convertToInt(magnitude * scale);
+	int peakPosition = x + width - convertToInt(peak * scale);
+	int peakHoldPosition = x + width - convertToInt(peakHold * scale);
+	int warningPosition = x + width - convertToInt(warningLevel * scale);
+	int errorPosition = x + width - convertToInt(errorLevel * scale);
 
 	int nominalLength = warningPosition - minimumPosition;
 	int warningLength = errorPosition - warningPosition;
@@ -1188,11 +1204,11 @@ void VolumeMeter::paintVMeter(QPainter &painter, int x, int y, int width,
 	QMutexLocker locker(&dataMutex);
 	int minimumPosition = y + 0;
 	int maximumPosition = y + height;
-	int magnitudePosition = int(y + height - (magnitude * scale));
-	int peakPosition = int(y + height - (peak * scale));
-	int peakHoldPosition = int(y + height - (peakHold * scale));
-	int warningPosition = int(y + height - (warningLevel * scale));
-	int errorPosition = int(y + height - (errorLevel * scale));
+	int magnitudePosition = y + height - convertToInt(magnitude * scale);
+	int peakPosition = y + height - convertToInt(peak * scale);
+	int peakHoldPosition = y + height - convertToInt(peakHold * scale);
+	int warningPosition = y + height - convertToInt(warningLevel * scale);
+	int errorPosition = y + height - convertToInt(errorLevel * scale);
 
 	int nominalLength = warningPosition - minimumPosition;
 	int warningLength = errorPosition - warningPosition;
@@ -1304,6 +1320,9 @@ void VolumeMeter::paintEvent(QPaintEvent *event)
 
 	QPainter painter(this);
 
+	if (vertical)
+		height -= METER_PADDING * 2;
+
 	// timerEvent requests update of the bar(s) only, so we can avoid the
 	// overhead of repainting the scale and labels.
 	if (event->region().boundingRect() != getBarRect()) {
@@ -1332,7 +1351,7 @@ void VolumeMeter::paintEvent(QPaintEvent *event)
 
 	if (vertical) {
 		// Invert the Y axis to ease the math
-		painter.translate(0, height);
+		painter.translate(0, height + METER_PADDING);
 		painter.scale(1, -1);
 	}
 

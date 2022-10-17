@@ -21,6 +21,7 @@
 #include <QMessageBox>
 #include <util/dstr.hpp>
 #include "window-basic-main.hpp"
+#include "window-basic-vcam-config.hpp"
 #include "display-helpers.hpp"
 #include "window-namedialog.hpp"
 #include "menu-button.hpp"
@@ -283,6 +284,9 @@ void OBSBasic::OverrideTransition(OBSSource transition)
 		obs_transition_swap_begin(transition, oldTransition);
 		obs_set_output_source(0, transition);
 		obs_transition_swap_end(transition, oldTransition);
+
+		// Transition overrides don't raise an event so we need to call update directly
+		OBSBasicVCamConfig::UpdateOutputSource();
 	}
 }
 
@@ -451,7 +455,7 @@ void OBSBasic::AddTransition()
 	obs_source_t *source = nullptr;
 	int i = 1;
 
-	while ((source = FindTransition(QT_TO_UTF8(placeHolderText)))) {
+	while ((FindTransition(QT_TO_UTF8(placeHolderText)))) {
 		placeHolderText = format.arg(++i);
 	}
 

@@ -551,7 +551,9 @@ static bool MakeUserDirs()
 		return false;
 	if (!do_mkdir(path))
 		return false;
+#endif
 
+#ifdef WHATSNEW_ENABLED
 	if (GetConfigPath(path, sizeof(path), "obs-studio/updates") <= 0)
 		return false;
 	if (!do_mkdir(path))
@@ -1111,16 +1113,20 @@ OBSThemeMeta *OBSApp::ParseThemeMeta(const char *path)
 
 	if (cf_token_is(cfp, "OBSThemeMeta") ||
 	    cf_go_to_token(cfp, "OBSThemeMeta", nullptr)) {
-		OBSThemeMeta *meta = new OBSThemeMeta();
+
 		if (!cf_next_token(cfp))
 			return nullptr;
 
 		if (!cf_token_is(cfp, "{"))
 			return nullptr;
 
+		OBSThemeMeta *meta = new OBSThemeMeta();
+
 		for (;;) {
-			if (!cf_next_token(cfp))
+			if (!cf_next_token(cfp)) {
+				delete meta;
 				return nullptr;
+			}
 
 			ret = cf_token_is_type(cfp, CFTOKEN_NAME, "name",
 					       nullptr);
@@ -1134,8 +1140,10 @@ OBSThemeMeta *OBSApp::ParseThemeMeta(const char *path)
 			if (ret != PARSE_SUCCESS)
 				continue;
 
-			if (!cf_next_token(cfp))
+			if (!cf_next_token(cfp)) {
+				delete meta;
 				return nullptr;
+			}
 
 			ret = cf_token_is_type(cfp, CFTOKEN_STRING, "value",
 					       ";");
@@ -1156,8 +1164,10 @@ OBSThemeMeta *OBSApp::ParseThemeMeta(const char *path)
 			}
 			bfree(str);
 
-			if (!cf_go_to_token(cfp, ";", nullptr))
+			if (!cf_go_to_token(cfp, ";", nullptr)) {
+				delete meta;
 				return nullptr;
+			}
 		}
 		return meta;
 	}
@@ -1204,7 +1214,9 @@ bool OBSApp::SetTheme(std::string name, std::string path)
 	if (path.empty())
 		return false;
 
-	themeMeta = ParseThemeMeta(path.c_str());
+	setStyleSheet("");
+	unique_ptr<OBSThemeMeta> themeMeta;
+	themeMeta.reset(ParseThemeMeta(path.c_str()));
 	string parentPath;
 
 	if (themeMeta && !themeMeta->parent.empty()) {
@@ -1220,7 +1232,6 @@ bool OBSApp::SetTheme(std::string name, std::string path)
 
 	QString mpath = QString("file:///") + lpath.c_str();
 	ParseExtraThemeData(path.c_str());
-	setStyle(new OBSIgnoreWheelProxyStyle);
 	setStyleSheet(mpath);
 	if (themeMeta) {
 		themeDarkMode = themeMeta->dark;
@@ -1236,6 +1247,7 @@ bool OBSApp::SetTheme(std::string name, std::string path)
 bool OBSApp::InitTheme()
 {
 	defaultPalette = palette();
+	setStyle(new OBSIgnoreWheelProxyStyle());
 
 	const char *themeName =
 		config_get_string(globalConfig, "General", "CurrentTheme3");
@@ -1510,7 +1522,7 @@ bool OBSApp::OBSInit()
 	setAttribute(Qt::AA_UseHighDpiPixmaps);
 #endif
 
-	qRegisterMetaType<VoidFunc>();
+	qRegisterMetaType<VoidFunc>("VoidFunc");
 
 #if !defined(_WIN32) && !defined(__APPLE__)
 	if (QApplication::platformName() == "xcb") {
@@ -1530,6 +1542,10 @@ bool OBSApp::OBSInit()
 		QGuiApplication::platformNativeInterface();
 	obs_set_nix_platform_display(
 		native->nativeResourceForIntegration("display"));
+#endif
+
+#ifdef __APPLE__
+	setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
 #endif
 
 	if (!StartupOBS(locale.c_str(), GetProfilerNameStore()))
@@ -1717,7 +1733,9 @@ QString OBSTranslator::translate(const char *context, const char *sourceText,
 				 const char *disambiguation, int n) const
 {
 	const char *out = nullptr;
-	if (!App()->TranslateString(sourceText, &out))
+	QString str(sourceText);
+	str.replace(" ", "");
+	if (!App()->TranslateString(QT_TO_UTF8(str), &out))
 		return QString(sourceText);
 
 	UNUSED_PARAMETER(context);
@@ -2274,10 +2292,8 @@ static int run_program(fstream &logFile, int argc, char *argv[])
 		}
 #endif
 
-		if (!created_log) {
+		if (!created_log)
 			create_log_file(logFile);
-			created_log = true;
-		}
 
 #ifdef __APPLE__
 		MacPermissionStatus audio_permission =
@@ -2795,6 +2811,64 @@ static void convert_14_2_encoder_setting(const char *encoder, const char *file)
 	obs_data_item_release(&cbr_item);
 }
 
+static void convert_28_1_encoder_setting(const char *encoder, const char *file)
+{
+	OBSDataAutoRelease data =
+		obs_data_create_from_json_file_safe(file, "bak");
+	bool modified = false;
+
+	if (astrcmpi(encoder, "jim_nvenc") == 0 ||
+	    astrcmpi(encoder, "jim_hevc_nvenc") == 0 ||
+	    astrcmpi(encoder, "ffmpeg_nvenc") == 0 ||
+	    astrcmpi(encoder, "ffmpeg_hevc_nvenc") == 0) {
+
+		if (obs_data_has_user_value(data, "preset") &&
+		    !obs_data_has_user_value(data, "preset2")) {
+			const char *preset =
+				obs_data_get_string(data, "preset");
+
+			if (astrcmpi(preset, "mq") == 0) {
+				obs_data_set_string(data, "preset2", "p6");
+				obs_data_set_string(data, "tune", "hq");
+				obs_data_set_string(data, "multipass", "qres");
+
+			} else if (astrcmpi(preset, "hq") == 0) {
+				obs_data_set_string(data, "preset2", "p4");
+				obs_data_set_string(data, "tune", "hq");
+				obs_data_set_string(data, "multipass", "qres");
+
+			} else if (astrcmpi(preset, "hp") == 0) {
+				obs_data_set_string(data, "preset2", "p1");
+				obs_data_set_string(data, "tune", "hq");
+				obs_data_set_string(data, "multipass",
+						    "disabled");
+
+			} else if (astrcmpi(preset, "ll") == 0) {
+				obs_data_set_string(data, "preset2", "p3");
+				obs_data_set_string(data, "tune", "ll");
+				obs_data_set_string(data, "multipass",
+						    "disabled");
+
+			} else if (astrcmpi(preset, "llhq") == 0) {
+				obs_data_set_string(data, "preset2", "p4");
+				obs_data_set_string(data, "tune", "ll");
+				obs_data_set_string(data, "multipass", "qres");
+
+			} else if (astrcmpi(preset, "llhp") == 0) {
+				obs_data_set_string(data, "preset2", "p2");
+				obs_data_set_string(data, "tune", "ll");
+				obs_data_set_string(data, "multipass",
+						    "disabled");
+			}
+
+			modified = true;
+		}
+	}
+
+	if (modified)
+		obs_data_save_json_safe(data, file, "tmp", "bak");
+}
+
 static void upgrade_settings(void)
 {
 	char path[512];
@@ -2842,13 +2916,13 @@ static void upgrade_settings(void)
 				strcat(path, "/");
 				strcat(path, ent->d_name);
 				strcat(path, "/recordEncoder.json");
-				convert_14_2_encoder_setting(rEnc, path);
+				convert_28_1_encoder_setting(rEnc, path);
 
 				path[pathlen] = 0;
 				strcat(path, "/");
 				strcat(path, ent->d_name);
 				strcat(path, "/streamEncoder.json");
-				convert_14_2_encoder_setting(sEnc, path);
+				convert_28_1_encoder_setting(sEnc, path);
 			}
 
 			path[pathlen] = 0;
